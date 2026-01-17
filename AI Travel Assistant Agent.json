@@ -1,0 +1,504 @@
+{
+  "name": "AI Travel Assistant Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an Autonomous AI Travel Planning Assistant.\n\nYour task is to generate a complete, professional, and personalized travel plan.\n\nIMPORTANT RULES (FOLLOW STRICTLY):\n- Return ONLY valid JSON\n- Do NOT add explanations, markdown, or extra text\n- Do NOT wrap the response in ``` or quotes\n- Every field in the JSON must be filled\n- Activities MUST be an array of strings\n\nYou MUST return the response in EXACTLY the following JSON structure:\n\n{\n  \"trip_summary\": \"string\",\n  \"day_wise_plan\": [\n    {\n      \"day\": \"Day 1\",\n      \"activities\": [\"string\"],\n      \"transport\": \"string\",\n      \"estimated_cost\": \"string\"\n    }\n  ],\n  \"hotel_recommendations\": [\"string\"],\n  \"travel_tips\": [\"string\"]\n}\n\nUser Inputs:\n- Source city: {{ $('Map in JavaScript').item.json.source_city }}\n- Destination city: {{ $('Map in JavaScript').item.json.destination_city }}\n- Start date: {{ $('Map in JavaScript').item.json.start_date }}\n- End date: {{ $('Map in JavaScript').item.json.end_date }}\n- Budget: {{ $('Map in JavaScript').item.json.budget }}\n- Number of travelers: {{ $('Map in JavaScript').item.json.travelers }}\n- Interests: {{ $('Map in JavaScript').item.json.interests }}\n- Travel pace: {{ $('Map in JavaScript').item.json.travel_pace }}\n- Temperature: {{ $('Map in JavaScript').item.json.temperature }}\n- Weather: {{ $('Map in JavaScript').item.json.weather }}\n- Latitude: {{ $('Map in JavaScript').item.json.lat }}\n- Longitude: {{ $('Map in JavaScript').item.json.lng }}\n- hotel_recommendations: {{ $json.hotels_real }}\n\nFINAL CHECK BEFORE RESPONDING:\n- Output must be valid JSON\n- No text before or after JSON\n- No trailing commas\n",
+        "hasOutputParser": true,
+        "batching": {
+          "batchSize": 5,
+          "delayBetweenBatches": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        2416,
+        512
+      ],
+      "id": "03159e49-33e0-4c30-b109-c37a26854b10",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini"
+        },
+        "builtInTools": {},
+        "options": {
+          "maxTokens": 4000,
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        2480,
+        688
+      ],
+      "id": "eda42b72-9d06-4722-9fd6-ca4bf3198d32",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "15AwsPa1lEUpcAAg",
+          "name": "n8n free OpenAI API credits"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Your Travel Plan is Ready ✈️",
+        "completionMessage": "={{ $json.result }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        2912,
+        512
+      ],
+      "id": "0ff866d5-e192-4aac-8d2b-425117a6540d",
+      "name": "Form",
+      "webhookId": "1a88c7cd-b68c-4afc-8eb6-fe68cae3a4d9"
+    },
+    {
+      "parameters": {
+        "url": "https://api.openweathermap.org/data/2.5/weather",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.destination_city.trim() }}"
+            },
+            {
+              "name": "appid",
+              "value": "7f0be1512d1bb9278deecb3adc2cff6c"
+            },
+            {
+              "name": "units",
+              "value": "metric"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2016,
+        800
+      ],
+      "id": "6ebe4f87-fb7e-496d-a6b1-6e001b0fbe9c",
+      "name": "HTTP Request Weather"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n stores incoming data in items[]\nconst item = items[0].json;\n\n// ----------------------------------------------------\n// 1. Get AI output safely\n// ----------------------------------------------------\nconst rawText =\n  item.text ||\n  item.output ||\n  item.response ||\n  item.content;\n\nif (!rawText) {\n  throw new Error(\"AI text output not found\");\n}\n\n// ----------------------------------------------------\n// 2. Parse AI JSON\n// ----------------------------------------------------\nlet data;\ntry {\n  data = JSON.parse(rawText);\n} catch (e) {\n  throw new Error(\"AI output is not valid JSON\");\n}\n\n// ----------------------------------------------------\n// 3. Validate AI structure\n// ----------------------------------------------------\nif (!Array.isArray(data.day_wise_plan)) {\n  throw new Error(\"day_wise_plan missing or invalid\");\n}\n\n// ----------------------------------------------------\n// 4. Get lat / lng from Map in JavaScript (fallback safe)\n// ----------------------------------------------------\nlet lat = 13.0827; // Default Chennai\nlet lng = 80.2707;\n\ntry {\n  const mapNode = $(\"Map in JavaScript\").item.json;\n  if (mapNode.lat && mapNode.lng) {\n    lat = parseFloat(mapNode.lat);\n    lng = parseFloat(mapNode.lng);\n  }\n} catch (e) {\n  // fallback values already set\n}\n\n// ----------------------------------------------------\n// 5. Weather-aware logic (from Weather in JavaScript)\n// ----------------------------------------------------\nlet weatherInsightHtml = \"\";\n\nif (item.weather_insight && item.temperature) {\n  weatherInsightHtml = `\n  <div style=\"\n    background:#e8f4ff;\n    padding:14px;\n    border-radius:10px;\n    margin:16px 0;\n    border-left:5px solid #2196f3;\n  \">\n    <h3>🌦️ Weather Insight</h3>\n    <p>${item.weather_insight}</p>\n    <p>🌡️ Temperature: <strong>${item.temperature}°C</strong></p>\n    <p style=\"font-size:13px;color:#444;\">\n      AI adapts your plan based on real-time weather conditions.\n    </p>\n  </div>\n  `;\n}\n\n// ----------------------------------------------------\n// 6. Start HTML UI\n// ----------------------------------------------------\nlet html = `\n<div style=\"\n  font-family:Arial, sans-serif;\n  max-width:720px;\n  margin:auto;\n  background:#ffffff;\n  padding:18px;\n  border-radius:14px;\n\">\n\n<h2 style=\"text-align:center;\">✈️ Your Travel Plan</h2>\n<p style=\"text-align:center;\">${data.trip_summary}</p>\n\n${weatherInsightHtml}\n\n<hr/>\n\n<h3>🔍 Search & Explore Location</h3>\n<p style=\"font-size:13px;color:#555;\">\nSearch any city / place / hotel using free OpenStreetMap\n</p>\n\n<form\n  method=\"GET\"\n  action=\"https://www.openstreetmap.org/search\"\n  target=\"mapFrame\"\n>\n  <input\n    type=\"text\"\n    name=\"query\"\n    placeholder=\"Search city / place / hotel\"\n    style=\"\n      width:70%;\n      padding:10px;\n      border-radius:6px;\n      border:1px solid #ccc;\n    \"\n    required\n  />\n  <button\n    type=\"submit\"\n    style=\"\n      padding:10px 14px;\n      border-radius:6px;\n      border:none;\n      background:#2196f3;\n      color:white;\n      cursor:pointer;\n    \"\n  >\n    Search\n  </button>\n</form>\n\n<hr/>\n\n<h3>📍 Location Map</h3>\n\n<iframe\n  name=\"mapFrame\"\n  width=\"100%\"\n  height=\"320\"\n  style=\"border-radius:10px; border:1px solid #ddd;\"\n  src=\"https://www.openstreetmap.org/export/embed.html?bbox=${lng-0.05}%2C${lat-0.05}%2C${lng+0.05}%2C${lat+0.05}&layer=mapnik&marker=${lat}%2C${lng}\">\n</iframe>\n\n<hr/>\n`;\n\n// ----------------------------------------------------\n// 7. Day-wise travel plan\n// ----------------------------------------------------\ndata.day_wise_plan.forEach(day => {\n  html += `\n  <div style=\"\n    border:1px solid #e0e0e0;\n    padding:14px;\n    margin:14px 0;\n    border-radius:10px;\n  \">\n    <h3>📅 ${day.day}</h3>\n    <ul>\n      ${day.activities.map(a => `<li>${a}</li>`).join(\"\")}\n    </ul>\n    <p>🚕 <strong>Transport:</strong> ${day.transport}</p>\n    <p>💰 <strong>Estimated Cost:</strong> ₹${day.estimated_cost}</p>\n  </div>\n  `;\n});\n\n// ----------------------------------------------------\n// 8. Hotel recommendations\n// ----------------------------------------------------\nif (Array.isArray(data.hotel_recommendations) && data.hotel_recommendations.length > 0) {\n  html += `\n  <hr/>\n  <h3>🏨 Recommended Hotels</h3>\n  <ul>\n    ${data.hotel_recommendations.map(h => `<li>${h}</li>`).join(\"\")}\n  </ul>\n  `;\n}\n\n// ----------------------------------------------------\n// 9. Travel tips\n// ----------------------------------------------------\nif (Array.isArray(data.travel_tips) && data.travel_tips.length > 0) {\n  html += `\n  <hr/>\n  <h3>🧳 Travel Tips</h3>\n  <ul>\n    ${data.travel_tips.map(t => `<li>${t}</li>`).join(\"\")}\n  </ul>\n  `;\n}\n\n// ----------------------------------------------------\n// 10. End UI\n// ----------------------------------------------------\nhtml += `\n<p style=\"\n  text-align:center;\n  font-size:12px;\n  color:#777;\n  margin-top:24px;\n\">\nAutonomous AI Travel Planner • Built with n8n\n</p>\n\n</div>\n`;\n\n// ----------------------------------------------------\n// 11. Return result\n// ----------------------------------------------------\nreturn [\n  {\n    json: {\n      result: html\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2720,
+        512
+      ],
+      "id": "030faae0-0ed8-44c0-b560-8ae2b1f93b51",
+      "name": "UI in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const weather = items[0].json;\n\nconst temp = weather.main.temp;\nconst condition = weather.weather[0].main.toLowerCase();\n\nlet weather_insight = \"\";\n\nif (condition.includes(\"rain\")) {\n  weather_insight = \"Rain expected. Indoor activities recommended.\";\n} else if (temp > 32) {\n  weather_insight = \"Hot weather. Early morning and evening outings suggested.\";\n} else {\n  weather_insight = \"Pleasant weather. Outdoor activities are ideal.\";\n}\n\nreturn [\n  {\n    json: {\n      temperature: temp,\n      condition: condition,\n      weather_insight: weather_insight\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2224,
+        800
+      ],
+      "id": "2ab97611-096f-414b-9463-7774b4050947",
+      "name": "Weather in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\n// Calculate trip duration\nconst startDate = new Date(item.start_date);\nconst endDate = new Date(item.end_date);\nconst tripDuration = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;\n\n// Format interests as comma-separated string\nconst formattedInterests = Array.isArray(item.interests) \n  ? item.interests.join(', ') \n  : item.interests || 'Not specified';\n\nreturn [\n  {\n    json: {\n      source_city: item.source_city,\n      destination_city: item.destination_city,\n      start_date: item.start_date,\n      end_date: item.end_date,\n      trip_duration: tripDuration,\n      budget: item.budget || 'Not specified',\n      travelers: item.travelers || 1,\n      interests: formattedInterests,\n      travel_pace: item.travel_pace,\n      accommodation_preference: item.accommodation_preference || 'Not specified',\n      transport_preference: item.transport_preference || 'Not specified',\n      special_constraints: item.special_constraints || 'None'\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2128,
+        512
+      ],
+      "id": "c13df5e5-a206-48ca-ad97-ddd7b72d9740",
+      "name": "Form in JavaScript"
+    },
+    {
+      "parameters": {
+        "formTitle": "Autonomous AI Travel Planner",
+        "formDescription": "Plan your complete trip using AI - personalized, optimized and adaptive",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Source City",
+              "fieldName": "source_city",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Destination City",
+              "fieldName": "destination_city",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Start Date",
+              "fieldType": "date",
+              "fieldName": "start_date",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "End Date",
+              "fieldType": "date",
+              "fieldName": "end_date",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Budget(in INR)",
+              "fieldType": "number",
+              "fieldName": "budget"
+            },
+            {
+              "fieldLabel": "Number of Travelers",
+              "fieldType": "number",
+              "fieldName": "travelers"
+            },
+            {
+              "fieldLabel": "Interests",
+              "fieldType": "checkbox",
+              "fieldName": "interests",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Culture"
+                  },
+                  {
+                    "option": "Food"
+                  },
+                  {
+                    "option": "Nature"
+                  },
+                  {
+                    "option": "Adventure"
+                  },
+                  {
+                    "option": "Shopping"
+                  },
+                  {
+                    "option": "Relaxation"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Travel Pace",
+              "fieldType": "dropdown",
+              "fieldName": "travel_pace",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Relaxed"
+                  },
+                  {
+                    "option": "Balanced"
+                  },
+                  {
+                    "option": "Fast"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Accommodation Preference",
+              "fieldType": "dropdown",
+              "fieldName": "accommodation_preference",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Budget"
+                  },
+                  {
+                    "option": "Mid-Range"
+                  },
+                  {
+                    "option": "Luxury"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Transport Preference",
+              "fieldType": "dropdown",
+              "fieldName": "transport_preference",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Flight"
+                  },
+                  {
+                    "option": "Train"
+                  },
+                  {
+                    "option": "Bus"
+                  },
+                  {
+                    "option": "Mixed"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Special Constraints",
+              "fieldType": "textarea",
+              "fieldName": "special_constraints",
+              "placeholder": "e.g. elderly travelers, children, accessibility needs, dietary restrictions"
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "buttonLabel": "Generate My Travel Plan"
+        }
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        1920,
+        512
+      ],
+      "id": "449164d8-b9a3-4ca9-81d1-243ed18c7351",
+      "name": "Form Submission",
+      "webhookId": "eada54dc-6230-456b-ba8f-7d54be3d05cb"
+    },
+    {
+      "parameters": {
+        "url": "https://nominatim.openstreetmap.org/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $('Form in JavaScript').item.json.destination_city.trim() }}"
+            },
+            {
+              "name": "format",
+              "value": "json"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-Workflow/1.0 (fiyarlin6@gmail.com)"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2432,
+        800
+      ],
+      "id": "56daa247-fc3c-4c29-9fd4-dafad8054a01",
+      "name": "HTTP Request Map"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get geocoding data from HTTP Request node (current input)\nconst geo = items[0].json;\n\nif (!geo || !geo.lat) {\n  throw new Error(\"Location not found or invalid geocoding response\");\n}\n\n// Get form data from Form in JavaScript node\nconst formData = $('Form in JavaScript').item.json;\n\n// Get weather data from Weather in JavaScript node\nconst weatherData = $('Weather in JavaScript').item.json;\n\n// Merge all data together\nreturn [\n  {\n    json: {\n      ...formData,\n      ...weatherData,\n      lat: parseFloat(geo.lat),\n      lng: parseFloat(geo.lon),\n      destination_city: formData.destination_city\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        800
+      ],
+      "id": "828c3098-caba-479b-a622-56b022a30d88",
+      "name": "Map in JavaScript"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://overpass-api.de/api/interpreter",
+        "sendBody": true,
+        "contentType": "raw",
+        "body": "=[out:json]; (   node[\"tourism\"=\"hotel\"](around:5000,{{ $json.lat }},{{ $json.lng }}); ); out;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2848,
+        800
+      ],
+      "id": "07ac9343-7fbe-409c-902d-c49360aeb9ff",
+      "name": "Overpass Hotels"
+    },
+    {
+      "parameters": {
+        "jsCode": "const hotelsRaw = $json.elements || [];\nconst city = $json.destination_city;\n\nlet hotels = hotelsRaw.slice(0, 5).map((h, index) => {\n  let price;\n\n  if (index < 2) price = \"₹1500–₹3000/night\";\n  else if (index < 4) price = \"₹3000–₹6000/night\";\n  else price = \"₹6000–₹9000/night\";\n\n  return {\n    name: h.tags.name || \"Unnamed Hotel\",\n    lat: h.lat,\n    lng: h.lon,\n    price: price\n  };\n});\n\nreturn [{\n  json: {\n    hotels_real: hotels\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3056,
+        800
+      ],
+      "id": "6352d6f9-b357-425b-bb63-6a330c07641c",
+      "name": "Hotel in JavaScript"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "UI in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Weather": {
+      "main": [
+        [
+          {
+            "node": "Weather in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UI in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weather in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Map",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Weather",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form Submission": {
+      "main": [
+        [
+          {
+            "node": "Form in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Map": {
+      "main": [
+        [
+          {
+            "node": "Map in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Overpass Hotels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Overpass Hotels": {
+      "main": [
+        [
+          {
+            "node": "Hotel in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hotel in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "8255e0dc-d0bc-4775-a1fe-3721760d6a99",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1c9ec9157936a8388175cfd958b89e9b8248742d1f7835c14d0ab94c82f6a426"
+  },
+  "id": "Q7tsufzbG141vXCsRbjNb",
+  "tags": []
+}
